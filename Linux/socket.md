@@ -257,6 +257,138 @@ TCP:传输控制协议，面向连接的，可靠的，基于字节流，仅支�
 4. 通信结束，断开连接
 ```
 
+**函数示例**
+```cpp
+// TCP 通信的服务器端
+
+#include<stdio.h>
+#include<arpa/inet.h>
+#include<unistd.h>
+#include<stdlib.h>
+#include<string.h>
+
+int main(){
+
+    // 1.创建套接字，用于监听的套接字
+
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(lfd == -1){
+        perror("socket");
+        exit(1);
+    }
+
+    // 2.绑定端口号+IP地址
+    struct sockaddr_in saddr;
+    inet_pton(AF_INET, "172.28.117.186", &saddr.sin_addr.s_addr);
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(9999);
+    int ret = bind(lfd, (struct sockaddr *)&saddr, sizeof(saddr));
+
+    if(ret == -1){
+        perror("bind");
+        exit(1);
+    }
+
+    // 3. 监听
+    ret = listen(lfd, 8);
+    if(ret == -1){
+        perror("listen");
+    }
+
+    // 4. 接受客户端的连接
+    struct sockaddr_in clientaddr;
+    socklen_t len = sizeof(clientaddr);
+    int cfd = accept(lfd, (struct sockaddr *)&clientaddr, &len);
+    if(cfd == -1){
+        perror("accept");
+        exit(1);
+    }
+
+    // 输出客户端的信息
+    char clientIP[16];
+    inet_ntop(AF_INET, &clientaddr.sin_addr.s_addr, clientIP, sizeof(clientIP));
+    unsigned short clientPort = ntohs(clientaddr.sin_port);
+    printf("client ip is %s, port is %d\n", clientIP, clientPort);
+
+    // 5. 通信
+    // 获取客户端的数据
+    
+    char recvBuf[1024] = {0};
+    int recvlen = read(cfd, recvBuf, sizeof(recvBuf));
+    if(recvlen == -1){
+        perror("read");
+        exit(1);
+    }else if(recvlen > 0){
+        printf("recv client data : %s\n", recvBuf);
+    }else if(recvlen == 0){
+        // 表示客户端断开连接
+        printf("client closed ...");
+    }
+
+    char * data = "hello, I am server";
+
+    // 给客户端发送数据
+    write(cfd, data, strlen(data));
+
+    // 关闭文件描述符
+    close(cfd);
+    close(lfd);
+    return 0;
+}
+```
+
+```cpp
+#include<unistd.h>
+#include<stdio.h>
+#include<arpa/inet.h>
+#include<stdlib.h>
+#include<string.h>
+
+int main(){
+    // 1. 创建套接字
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd == -1){
+        perror("socket");
+        exit(-1);
+    }
+
+    // 2. 连接服务器端
+    struct sockaddr_in serveraddr;
+    inet_pton(AF_INET, "172.28.117.186", &serveraddr.sin_addr.s_addr);
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_port = htons(9999);
+    int ret = connect(fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+
+    if(ret == -1){
+        perror("connect");
+        exit(-1);
+    }
+
+    // 3. 通信
+    char *data = "hello, I am client";
+    // 给服务端发送数据
+
+    write(fd, data, strlen(data));
+
+    // 从服务端读数据
+    char recvBuf[1024] = {0};
+    int recvLen = read(fd, recvBuf, sizeof(recvBuf));
+    if(recvLen == -1){
+        perror("read");
+        exit(-1);
+    }else if(recvLen == 0){
+        printf("server close ...");
+    }else if(recvLen > 0){
+        printf("recv server data : %s\n", recvBuf);
+    }
+
+    // 4. 关闭文件描述符
+    close(fd);
+    return 0;
+}
+```
+
+
 ## 套接字函数
 
 ```c
@@ -385,3 +517,307 @@ TCP 中采用滑动窗口来进行传输控制，滑动窗口的大小意味着�
 客户端和服务器端都可以主动发起断开连接，谁先调用close()谁就是发起者
 因为在TCP连接的时候，采用三次握手建立的连接是双向的，在断开的时候也需要双向断开
 ```
+
+## TCP通信并发
+```
+要实现TCP通信服务器处理并发的任务，使用多线程或者多进程来解决
+
+思路：
+    1.一个父进程，多个子进程
+    2.父进程负责等待并接受客户端的连接
+    3.子进程：完成通信，接受一个客户端连接，就创建一个子进程用于通信
+```
+
+### 多进程实现并发服务器
+
+```cpp
+//客户端
+#include<unistd.h>
+#include<stdio.h>
+#include<arpa/inet.h>
+#include<stdlib.h>
+#include<string.h>
+
+int main(){
+    // 1. 创建套接字
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd == -1){
+        perror("socket");
+        exit(-1);
+    }
+
+    // 2. 连接服务器端
+    struct sockaddr_in serveraddr;
+    inet_pton(AF_INET, "172.28.117.186", &serveraddr.sin_addr.s_addr);
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_port = htons(9999);
+    int ret = connect(fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+
+    if(ret == -1){
+        perror("connect");
+        exit(-1);
+    }
+
+    // 3. 通信
+    char recvBuf[1024] = {0};
+    int i = 0;
+    while(1){
+        sprintf(recvBuf, "data : %d\n", i);
+
+        // 给服务端发送数据
+        write(fd, recvBuf, strlen(recvBuf) + 1);
+        i++;
+        
+        // 从服务端读数据
+        int recvLen = read(fd, recvBuf, sizeof(recvBuf));
+        if(recvLen == -1){
+            perror("read");
+            exit(-1);
+        }else if(recvLen == 0){
+            printf("server closed...");
+        }else if(recvLen > 0){
+            printf("recv server data : %s\n", recvBuf);
+        }
+        sleep(1);
+    }
+    // 4. 关闭文件描述符
+    close(fd);
+
+    return 0;
+}
+```
+
+**注意**：sleep需要放在read和write的同侧，不能放在这俩之间，不然会报错`read: Connection reset by peer`，放在中间的时候如果终端终止客户端，即终止客户端的socket，如果另一端仍发送数据，发送的第一个数据包引发该异常(Connect reset by peer).
+
+```cpp
+// 服务端
+#include<stdio.h>
+#include<arpa/inet.h>
+#include<unistd.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/types.h>
+#include<signal.h>
+#include<wait.h>
+#include<errno.h>
+
+void recycleChild(int arg){
+    while(1){
+        int ret = waitpid(-1, NULL, WNOHANG);
+        if(ret == -1){
+            break;
+            //所有子进程都回收
+        }else if(ret == 0){
+            break;
+            // 还有子进程活着
+        }else if(ret > 0){
+            printf("子进程 %d 被回收了\n", ret);
+        }
+    }
+}
+
+int main(){
+
+    // 注册信号捕捉
+    struct sigaction act;
+    act.sa_flags = 0;
+    sigemptyset(&act.sa_mask);
+    act.sa_handler = recycleChild;
+
+    sigaction(SIGCHLD, &act, NULL);
+
+    // 创建socket
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(lfd == -1){
+        perror("socket");
+        exit(-1);
+    }
+
+    // 绑定
+    struct sockaddr_in saddr;
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(9999);
+    saddr.sin_addr.s_addr = INADDR_ANY;
+
+    int ret = bind(lfd, (struct sockaddr*)&saddr, sizeof(saddr));
+    if(ret == -1){
+        perror("bind");
+        exit(-1);
+    }
+
+    // 监听
+    ret = listen(lfd, 128);
+    if(ret == -1){
+        perror("listen");
+        exit(-1);
+    }
+
+    // 不断循环等待连接
+    while(1){
+        // 接受连接
+        struct sockaddr_in clientaddr;
+        int len = sizeof(clientaddr);
+        int cfd = accept(lfd, (struct sockaddr*)&clientaddr, &len);
+        if(cfd == -1){
+            if(errno == EINTR){
+                // printf("1\n");
+                continue;
+            }
+            perror("accept");
+            exit(-1);
+        }
+        pid_t pid = fork();
+        if(pid == 0){
+            // 子进程
+            // 获取客户端的信息
+            char clientIP[16];
+            inet_ntop(AF_INET, &clientaddr.sin_addr.s_addr, clientIP, sizeof(clientIP));
+            unsigned short clientPort = ntohs(clientaddr.sin_port);
+            printf("client ip is : %s, port is %d \n", clientIP, clientPort);
+
+            // 接受客户端发来的数据
+            char recvBuf[1024] = {0};
+            while(1){
+                int recvLen = read(cfd, &recvBuf, sizeof(recvBuf));
+
+                if(len == -1){
+                    perror("read");
+                    exit(-1);
+                }else if(len == 0){
+                    printf("client closed...\n");
+                    break;
+                }else{
+                    printf("recv data : %s\n", recvBuf);
+                }
+
+                write(cfd, recvBuf, strlen(recvBuf));
+            }
+            close(cfd);
+            exit(0);
+        }
+    }
+    close(lfd);
+    return 0;
+}
+```
+
+### 多线程实现并发服务器
+
+```cpp
+#include<stdio.h>
+#include<arpa/inet.h>
+#include<unistd.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/types.h>
+#include<pthread.h>
+
+struct sockInfo{
+    int fd; //通信的文件描述符
+    struct sockaddr_in addr;
+    pthread_t tid;  // 线程号
+};
+
+struct sockInfo sockinfos[128];
+
+void *working(void *arg){
+    struct sockInfo *pinfo = (struct sockInfo *)arg;
+    char clientIP[16];
+    inet_ntop(AF_INET, &pinfo->addr.sin_addr.s_addr, clientIP, sizeof(clientIP));
+    unsigned short clientPort = ntohs(pinfo->addr.sin_port);
+    printf("client ip is : %s, port is %d \n", clientIP, clientPort);
+
+    // 接受客户端发来的数据
+    char recvBuf[1024] = {0};
+    while(1){
+        int len = read(pinfo->fd, &recvBuf, sizeof(recvBuf));
+
+        if(len == -1){
+            perror("read");
+            exit(-1);
+        }else if(len == 0){
+            printf("client closed...\n");
+            break;
+        }else if(len > 0){
+            printf("recv data : %s\n", recvBuf);
+        }
+
+        write(pinfo->fd, recvBuf, strlen(recvBuf) + 1);
+    }
+    close(pinfo->fd);
+    return NULL;
+}
+
+int main(){
+    // 创建socket
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(lfd == -1){
+        perror("socket");
+        exit(-1);
+    }
+
+    // 绑定
+    struct sockaddr_in saddr;
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(9999);
+    saddr.sin_addr.s_addr = INADDR_ANY;
+
+    int ret = bind(lfd, (struct sockaddr*)&saddr, sizeof(saddr));
+    if(ret == -1){
+        perror("bind");
+        exit(-1);
+    }
+
+    // 监听
+    ret = listen(lfd, 128);
+    if(ret == -1){
+        perror("listen");
+        exit(-1);
+    }
+
+    // 初始化数据
+    int max = sizeof(sockinfos) / sizeof(sockinfos[0]);
+    for(int i = 0; i < max; i++){
+        bzero(&sockinfos[i], sizeof(sockinfos[i]));
+        sockinfos[i].fd = -1;
+        sockinfos[i].tid = -1;
+    }
+
+    // 循环等待客户端连接
+    while(1){
+        // 接受连接
+        struct sockaddr_in clientaddr;
+        int len = sizeof(clientaddr);
+        int cfd = accept(lfd, (struct sockaddr*)&clientaddr, &len);
+
+        struct sockInfo *pinfo;
+        for(int i = 0; i < max; i++){
+            if(sockinfos[i].fd == -1){
+                pinfo = &sockinfos[i];
+                break;
+            }
+            if(i == max - 1){
+                sleep(1);
+                i = 0;
+            }
+        }
+        pinfo->fd = cfd;
+        memcpy(&pinfo->addr, &clientaddr, len);
+        pthread_create(&pinfo->tid, NULL, working, pinfo);
+
+        // 回收资源，设置线程分离
+        pthread_detach(pinfo->tid);
+    }
+    close(lfd);
+    return 0;
+}
+```
+
+需要注意的几个点
+1. 为什么要设置全局变量sockInfo
+    如果设置的是局部变量，那么在循环结束的时候，栈需要回收该内存空间，那么我们传给working的地址就是无效的，线程不能够获得参数
+2. 对全局变量sockInfo初始化
+    如果不进行初始化会怎么样？也许我们就不知道这个变量是否有被使用从而导致多个线程共用一个变量
+
+遗留的问题：
+&emsp;&emsp;回收线程后怎么将对应的sockInfo重新初始化
