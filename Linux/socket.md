@@ -821,3 +821,59 @@ int main(){
 
 遗留的问题：
 &emsp;&emsp;回收线程后怎么将对应的sockInfo重新初始化
+
+
+## TCP状态转换
+
+
+什么是半关闭？
+> 当TCP链接中A向B发送FIN请求关闭，另一端B回应ACK之后（A端静茹FIN_WAIT_2状态），并没有立即发送FIN给A，A方处于半连接状态（半开关），此时A可以继续接受B发送的数据，但是A已经不能再向B发送数据
+
+从程序的角度，可以使用API来控制实现半连接状态：
+```cpp
+#include<sys/socket.h>
+int shutdown(int sockfd, int how);
+sockfd: 需要关闭的socket的描述符
+how：   允许为shutdown操作选择以下几种方式：
+    SHUT_RD(0)：关闭sockfd上的读功能，此选项将不允许sockfd进行读操作
+                该套接字不再接收数据，任何当前在套接字接受缓冲区的数据将被无声的丢掉
+    SHUT_WR(1): 关闭sockfd上的写功能，此选项将不允许sockfd进行写操作。进程不能再对此套接字发出写操作
+    SHUT_RDWR(2): 关闭sockfd上的读写功能。相当于调用shutdown两次：首先是SHUT_RD，然后是SHUT_WR。
+```
+
+使用close中止一个连接，但它只是减少描述符的引用计数，并不直接关闭连接，只有当描述符的引用计数为0时才关闭连接。shutdown不考虑描述符的引用计数，直接关闭描述符。也可以选择中止一个方向的连接，只中止读或者写
+**注意**
+1. 如果有多个进程共享一个套接字，close每被调用一次，计数减1，直到计数为0时，也就是所用进程都调用了close，套接字将被释放
+2. 在多进程中如果一个进程调用了shutdown(sfd, SHUT_RDWR)后，其它的进程将无法进行通信。但如果一个进程close(sfd)将不会影响到其它进程
+
+
+## 端口复用
+> 端口复用最常用的用途是
+> - 防止服务器重启时之前绑定的端口还未释放
+> - 程序突然退出而系统没有释放端口
+
+```cpp
+#include<sys/types.h>
+#include<sys/socket.h>
+int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
+    参数：
+        - sockfd：要操作的文件描述符
+        - level：级别 - SQL_SOCKET（端口复用的级别）
+        - optname：选项的名称
+            - SO_REUSEADDR
+            - SO_REUSEPORT
+        - optval：端口复用的值（整型）
+            - 1：可以复用
+            - 0： 不可以复用
+        - optlen：optval参数的大小
+端口复用，设置的时机是在服务器绑定端口之前
+setsockopt();
+bind();
+```
+
+查看网络相关信息的命令
+netstat
+&emsp;&emsp;参数
+&emsp;&emsp;&emsp;&emsp;-a 所有的socket
+&emsp;&emsp;&emsp;&emsp;-p 显示正在使用socket的程序的名称
+&emsp;&emsp;&emsp;&emsp;-n 直接使用IP地址，而不通过域名服务器
