@@ -30,4 +30,17 @@
 - `public float floatValue()`：以float形式返回Byte对象的值
 - `public double doubleValue()`：以double形式返回Byte对象的值
 - `public static byte parseByte(String s, int radix)`：将radix进制形式的字符串解析为byte的值
-- `public static byte parseByte(String s)`：将十进制形式的字符串解析为
+- `public static byte parseByte(String s)`：将十进制形式的字符串解析为十进制的byte值
+- `public String toString()`：将Byte对象的值转换为字符串
+- `public static String toString(byte b)`：静态方法，调用这个函数将byte值转换为十进制的字符串
+
+- `public static int toUnsignedInt(byte x)`：将当前byte的值转换为无符号形式，用int存储
+- `public static long toUnsignedLong(byte x)`：将当前byte的值转换为无符号形式，用long存储
+- `public static int compare(byte x, byte y)`：比较两个byte的值
+- `public int compareTo(Byte anotherByte)`：比较当前Byte对象与另一个对象的大小
+
+- `public static int compareUnsigned(byte x, byte y)`：以无符号形式比较两个byte
+- `public int hashCode()`
+- `public static int hashCode(byte value)`
+
+- `public boolean equals(Object obj)`：比较两个对象是否相等
